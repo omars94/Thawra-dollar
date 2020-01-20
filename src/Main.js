@@ -8,19 +8,58 @@ import {
   Platform,
   Switch,
   SafeAreaView,
+  Linking,
   TouchableOpacity,
   Dimensions,
-  ScrollView
+  ScrollView,
+  NativeModules,
+  Keyboard,
+  ActivityIndicator
 } from 'react-native';
 import Axios from 'axios';
 import coin from './assets/icons/coin-black.png';
-import audio from './assets/icons/mute.png';
+import audio from './assets/icons/audio-speaker-on.png';
 import Tts from 'react-native-tts';
 import numberToWords from 'number-to-words';
+import moment from 'moment';
+import 'moment/locale/fr';
+import 'moment/locale/ar';
+var left = 'left';
+var right = 'right';
+var arabicNumbers = '٠١٢٣٤٥٦٧٨٩';
+var arabicMap = arabicNumbers.split('');
+let locale = '';
+let isiPhone = Platform.OS === 'ios';
+locale = isiPhone
+  ? NativeModules.SettingsManager.settings.AppleLocale
+  : NativeModules.I18nManager.localeIdentifier; // "fr_FR"
+if (locale === undefined) {
+  // iOS 13 workaround, take first of AppleLanguages array  ["en", "en-NZ"]
+  locale = NativeModules.SettingsManager.settings.AppleLanguages[0];
+  if (locale == undefined) {
+    locale = 'en'; // default language
+  }
+}
+if (isiPhone && locale.includes('ar')) {
+  left = 'right';
+  right = 'left';
+}
+console.log(locale);
+
 const ID = '17MC8Gt5AwwAFzr7Awq3c85tV5baZJ--9U2drwnen8W8';
 
 printError = e => console.log(JSON.parse(JSON.stringify(e)));
-
+convertToArabic = number => number.replace(/\d/g, m => arabicMap[parseInt(m)]);
+arabicDesc = [
+  'مرحبًا بك في تطبيق ثورة دولار',
+  '!معرفة مقدار دولار تستحق اليوم',
+  'LebaneseLira.org يتم جمع هذه البيانات من'
+];
+englishDesc = [
+  'Welcome to Thawra Dollar app.',
+  'Find out how much dollars are worth today!',
+  'This Data is gathered from LebaneseLira.org'
+];
 formatNumber = (number, decimal = 0) => {
   var splitNum;
   number = Math.abs(number);
@@ -33,15 +72,53 @@ formatNumber = (number, decimal = 0) => {
 export default class Main extends Component {
   state = {
     rate: [],
-    dollar2Lebanese: 1900,
-    lebanese2Dollar: 2000,
+    dollar2Lebanese: '',
+    lebanese2Dollar: '',
     money: 0,
+    keyboardDidShow: false,
     buyDollars: false,
-    dateAndTime: ''
+    dateAndTime: '',
+    loading: true
   };
-  async componentDidMount() {
-    let getSheetData;
+  componentWillUnmount() {
+    this.keyboardDidShowListener.remove();
+    this.keyboardDidHideListener.remove();
+    this.keyboardWillHideListener.remove();
+    this.keyboardWillShowListener.remove();
+    clearInterval(this.interval);
+    this.interval = null;
+  }
 
+  _keyboardDidShow() {
+    this.setState({ keyboardDidShow: true });
+  }
+
+  _keyboardDidHide() {
+    this.setState({ keyboardDidShow: false });
+  }
+  async componentDidMount() {
+    this.keyboardWillShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      () => this._keyboardDidShow()
+    );
+    this.keyboardWillHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => this._keyboardDidHide()
+    );
+    this.keyboardDidShowListener = Keyboard.addListener(
+      'keyboardWillShow',
+      () => this._keyboardDidShow()
+    );
+    this.keyboardDidHideListener = Keyboard.addListener(
+      'keyboardWillHide',
+      () => this._keyboardDidHide()
+    );
+    this.getRate();
+    this.interval = setInterval(this.getRate, 60 * 1000);
+  }
+  getRate = async () => {
+    let getSheetData;
+    let isArabic = locale && locale.includes('ar');
     try {
       getSheetData = await Axios({
         url: `https://sheets.googleapis.com/v4/spreadsheets/${ID}/values/USD!A1:Z99`,
@@ -62,7 +139,7 @@ export default class Main extends Component {
       if (getSheetData && getSheetData.status === 200) {
         index = 5;
         if (getSheetData.data.values.length > 0)
-          if (
+          while (
             getSheetData.data.values[index][2] == '-' ||
             getSheetData.data.values[index][3] == '-'
           ) {
@@ -74,30 +151,44 @@ export default class Main extends Component {
         lebanese2Dollar = parseInt(
           getSheetData.data.values[index][3].replace(/,/g, '')
         );
+        dateAndTime = `${getSheetData.data.values[index][0]} ${getSheetData.data
+          .values[index][1]}`;
+        if (isArabic) {
+          moment.locale('ar');
+          dateAndTimesss = moment(dateAndTime, 'dd, MMM D, YYYY HH:mm');
+          dateAndTime = moment(new Date(dateAndTime)).format(
+            'ddd MMM D YYYY HH:mm'
+          );
+        }
         this.setState({
           dollar2Lebanese,
           lebanese2Dollar,
-          dateAndTime:
-            getSheetData.data.values[index][0] +
-            ' ' +
-            getSheetData.data.values[index][1],
-          rate: getSheetData.data.values[index]
+          dateAndTime,
+          rate: getSheetData.data.values[index],
+          loading: false
         });
       }
     } catch (e) {
       printError(e);
     }
-  }
-
+  };
   render() {
+    let isArabic = locale && locale.includes('ar');
+    let { keyboardDidShow } = this.state;
     let calculated = 0;
+    let dayName = null,
+      dayDate = null,
+      monthName = null,
+      year = null,
+      dateAndTimeSplitted = null,
+      time = null;
+    let money = (this.state.money + '').replace(/,/g, '');
     if (!this.state.buyDollars) {
-      calculated = this.state.money * this.state.dollar2Lebanese;
+      calculated = money * this.state.dollar2Lebanese;
     } else {
-      calculated = this.state.money * this.state.lebanese2Dollar;
+      calculated = money * this.state.lebanese2Dollar;
     }
     calculatedInNumbers = calculated;
-    let money = this.state.money + '';
     money = formatNumber(money, 2);
     dollar2Lebanese = this.state.dollar2Lebanese + '';
     dollar2Lebanese = formatNumber(this.state.dollar2Lebanese);
@@ -107,316 +198,436 @@ export default class Main extends Component {
     calculatedInWords =
       calculated !== '' &&
       numberToWords.toWords(calculatedInNumbers) + ' Lebanese Liras';
+    if (this.state.dateAndTime !== '') {
+      dateAndTimeSplitted = this.state.dateAndTime.replace(',', '').split(' ');
+      if (isArabic) dateAndTimeSplitted = dateAndTimeSplitted.reverse();
+      dayName = dateAndTimeSplitted.length >= 1 && dateAndTimeSplitted[0];
+      dayDate = dateAndTimeSplitted.length >= 3 && dateAndTimeSplitted[2];
+      if (dayDate) {
+        dayDate = dayDate.replace(',', '');
+      }
+      monthName = dateAndTimeSplitted.length >= 2 && dateAndTimeSplitted[1];
+      year = dateAndTimeSplitted.length >= 4 && dateAndTimeSplitted[3];
+      time = dateAndTimeSplitted.length >= 5 && dateAndTimeSplitted[4];
+    }
+    let calculatedNumber = calculated + 'L.L.';
+    if (isArabic) {
+      calculatedNumber = ' ل.ل.' + convertToArabic(calculated);
+    }
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#FFF' }}>
-        <ScrollView contentContainerStyle={{ flex: 1 }}>
-          <KeyboardAvoidingView
-            keyboardVerticalOffset={0}
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : null}
+        {!this.state.loading &&
+          <ScrollView
+            contentContainerStyle={{
+              flex: 1,
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
           >
-            <View
-              style={{
-                flex: 1,
-                width: '100%',
-                alignItems: 'center',
-                backgroundColor: '#FFF',
-                justifyContent: 'space-around'
-              }}
-            >
-              <View style={[styles.textView, { flex: 0.5 }]}>
-                <Text style={styles.text}>Black Market Dollar</Text>
-              </View>
-              <View style={[styles.textView, { flex: 0.5 }]}>
-                <Text style={styles.text}>
-                  {this.state.dateAndTime}
-                </Text>
-              </View>
-              <View style={{ flex: 1, flexDirection: 'row' }}>
-                <View style={{ flex: 1, flexDirection: 'row' }}>
-                  <View style={{ flex: 2, borderWidth: 0.2 }}>
-                    <View style={[styles.textView, { borderBottomWidth: 0.2 }]}>
-                      <Text style={styles.text}>Sell</Text>
-                    </View>
-                    <View style={styles.textView}>
-                      <Text style={styles.text}>
-                        {dollar2Lebanese}
-                      </Text>
-                    </View>
-                  </View>
-                  <View
-                    style={[styles.textView, { flex: 1, borderWidth: 0.2 }]}
-                  >
-                    <Image
-                      style={{
-                        width: 50,
-                        borderRadius: 50 / 2,
-                        overflow: 'hidden',
-                        height: 50,
-                        zIndex: 100
-                      }}
-                      resizeMode="contain"
-                      source={coin}
-                    />
-                  </View>
-                  <View style={{ flex: 2, borderWidth: 0.2 }}>
-                    <View style={[styles.textView, { borderBottomWidth: 0.2 }]}>
-                      <Text style={styles.text}>Buy</Text>
-                    </View>
-                    <View style={styles.textView}>
-                      <Text style={styles.text}>
-                        {lebanese2Dollar}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
-              <View style={[{ flex: 3, borderWidth: 0, width: '100%' }]}>
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    flex: 1,
-                    minHeight: 30,
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
+            <View style={{ flex: 1, width: '80%' }}>
+              {!keyboardDidShow &&
+                <View style={{ flex: 0.3 }}>
                   <View
                     style={{
-                      width: Dimensions.get('window').width,
-                      flex: 1,
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      zIndex: 100,
+                      flex: 0.5,
+                      width: '100%',
                       alignItems: 'center',
+                      backgroundColor: '#FFF',
                       justifyContent: 'center'
                     }}
-                    pointerEvents="none"
                   >
-                    <Image
-                      style={{
-                        width: 35,
-                        borderRadius: 35 / 2,
-                        overflow: 'hidden',
-                        height: 35,
-                        zIndex: 100
-                      }}
-                      resizeMode="contain"
-                      source={coin}
-                    />
-                  </View>
-                  <View
-                    style={{
-                      flex: 1,
-                      padding: 20,
-                      paddingRight: 0
-                    }}
-                  >
-                    <TouchableOpacity
-                      onPress={() => {
-                        this.setState({ buyDollars: false });
-                      }}
-                      style={{
-                        backgroundColor: this.state.buyDollars
-                          ? '#ecf0f1'
-                          : '#27ae60',
-                        height: 50,
-                        maxHeight: 50,
-                        flex: 1,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderWidth: 0.25,
-                        borderEndWidth: 0,
-                        borderColor: !this.state.buyDollars
-                          ? '#ecf0f1'
-                          : '#27ae60',
-                        borderTopEndRadius: 0,
-                        borderBottomEndRadius: 0,
-                        borderRadius: 15
-                      }}
+                    <View
+                      style={[
+                        styles.textView,
+                        {
+                          borderBottomWidth: 0.5,
+                          borderColor: '#DBDBDB',
+                          alignItems: 'flex-start'
+                        }
+                      ]}
                     >
                       <Text
-                        style={[
-                          styles.text,
-                          {
-                            fontSize: 20,
-                            color: '#e67e22',
-                            fontWeight: this.state.buyDollars
-                              ? 'normal'
-                              : 'bold'
-                          }
-                        ]}
+                        style={
+                          (
+                            styles.text,
+                            {
+                              textAlign: left,
+                              width: '100%',
+
+                              fontWeight: '700',
+                              color: '#4968C0',
+                              fontSize: 21
+                            }
+                          )
+                        }
                       >
-                        Sell
+                        {isArabic ? 'ثورة دولار' : 'Thawra Dollar'}
                       </Text>
-                    </TouchableOpacity>
+                    </View>
                   </View>
                   <View
-                    style={{
-                      flex: 1,
-                      padding: 20,
-                      paddingLeft: 0
-                    }}
-                  >
-                    <TouchableOpacity
-                      onPress={() => {
-                        this.setState({ buyDollars: true });
-                      }}
-                      style={{
-                        backgroundColor: this.state.buyDollars
-                          ? '#27ae60'
-                          : '#ecf0f1',
-                        borderStartWidth: 0,
-                        borderColor: this.state.buyDollars
-                          ? '#ecf0f1'
-                          : '#27ae60',
-                        height: 50,
-                        maxHeight: 50,
+                    style={[
+                      styles.textView,
+                      {
                         flex: 1,
-                        borderTopStartRadius: 0,
-                        borderBottomStartRadius: 0,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderWidth: 0.5,
-                        borderRadius: 15
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.text,
-                          {
-                            fontSize: 20,
-                            color: '#e67e22',
-                            fontWeight: this.state.buyDollars
-                              ? 'bold'
-                              : 'normal'
-                          }
-                        ]}
-                      >
-                        Buy
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    flex: 1
-                  }}
-                >
-                  <TextInput
-                    keyboardType="number-pad"
-                    placeholder={'Enter Money Amount'}
-                    maxLength={12}
-                    value={this.state.money}
-                    placeholderTextColor="#576574"
-                    onChangeText={money => {
-                      if (money.match(/[0-9]*/gm)) {
-                        this.setState({
-                          money
-                          // money: money.replace(/[- #*;,.<>\{\}\[\]\\\/]/gi, '')
-                        });
-                      } else {
-                        this.setState({ money: this.state.money });
+                        borderBottomWidth: 0.5,
+                        borderColor: '#DBDBDB',
+                        alignItems: 'flex-start'
                       }
-                    }}
-                    style={{
-                      borderWidth: 0.25,
-                      borderRadius: 10,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      textAlign: 'center',
-                      height: 40,
-                      borderColor: '#576574',
-                      width: '90%',
-                      color: '#1dd1a1'
-                    }}
-                  />
-                </View>
-                <View style={{ flexDirection: 'row' }}>
-                  <View
-                    style={{
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexDirection: 'row',
-                      flex: 1,
-                      width: '80%',
-                      borderRightWidth: 1,
-                      flexWrap: 'wrap'
-                    }}
+                    ]}
                   >
                     <Text
                       style={[
                         styles.text,
                         {
-                          fontSize: 20,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          alignSelf: 'center'
+                          width: '100%',
+                          textAlign: left,
+                          color: '#949494',
+                          fontSize: 14
                         }
                       ]}
                     >
-                      {calculated} {'L.L.'}
+                      {isArabic ? arabicDesc[0] : englishDesc[0]}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.text,
+                        {
+                          width: '100%',
+                          textAlign: left,
+                          color: '#949494',
+                          fontSize: 14
+                        }
+                      ]}
+                    >
+                      {isArabic ? arabicDesc[1] : englishDesc[1]}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.text,
+                        {
+                          width: '100%',
+                          textAlign: left,
+                          color: '#949494',
+                          fontSize: 14
+                        }
+                      ]}
+                    >
+                      {isArabic
+                        ? arabicDesc[2].replace('LebaneseLira.org', ' ')
+                        : englishDesc[2].replace('LebaneseLira.org', ' ')}
+                      <Text
+                        accessibilityRole="link"
+                        onPress={() =>
+                          Linking.openURL('http://lebaneselira.org')}
+                        style={[
+                          styles.text,
+                          {
+                            textAlign: left,
+                            color: 'blue',
+                            fontSize: 14
+                          }
+                        ]}
+                      >
+                        {' '}LebaneseLira.org
+                      </Text>
                     </Text>
                   </View>
-                  <TouchableOpacity
-                    style={{
-                      height: 35,
-                      width: '20%',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      Tts.speak(calculatedInWords);
-                    }}
-                  >
-                    <Image source={audio} style={{ width: 25, height: 25 }} />
-                  </TouchableOpacity>
-                </View>
-                <View style={[styles.textView, { flex: 2, borderWidth: 0 }]}>
+                </View>}
+              <KeyboardAvoidingView
+                keyboardVerticalOffset={0}
+                style={{ flex: 1, width: '100%' }}
+                behavior={isiPhone ? 'padding' : null}
+              >
+                <View style={[styles.textView, { height: 40, flex: null }]}>
                   <Text
                     style={[
                       styles.text,
                       {
+                        color: '#949494',
                         fontSize: 14,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        alignSelf: 'center',
-                        textTransform: 'capitalize'
+                        textAlign: left
                       }
                     ]}
                   >
-                    {calculatedInWords}
+                    {isArabic ? 'التاريخ' : 'Date'}
                   </Text>
                 </View>
-              </View>
-
-              <View
-                style={[
-                  styles.textView,
-                  {
-                    height: 50,
-                    flex: 0.1,
-                    backgroundColor: '#FFF',
-                    marginBottom: 10
-                  }
-                ]}
-              >
-                <Text
-                  style={[styles.text, { fontSize: 14, fontWeight: '300' }]}
+                <View
+                  style={[
+                    styles.textView,
+                    {
+                      flex: 0.5,
+                      flexDirection: isArabic ? 'row-reverse' : 'row',
+                      borderRadius: 8,
+                      backgroundColor: '#ECEEF2',
+                      height: 50,
+                      marginBottom: 15,
+                      paddingVertical: 5
+                    }
+                  ]}
                 >
-                  This data is gathered from LebaneseLira.org
-                </Text>
-              </View>
+                  <View style={styles.dateBox}>
+                    <Text style={[styles.text, styles.dateBoxText]}>
+                      {dayName && dayName}
+                    </Text>
+                  </View>
+                  <View style={styles.dateBox}>
+                    <Text style={[styles.text, styles.dateBoxText]}>
+                      {dayDate && dayDate}
+                    </Text>
+                  </View>
+                  <View style={styles.dateBox}>
+                    <Text style={[styles.text, styles.dateBoxText]}>
+                      {monthName && monthName}
+                    </Text>
+                  </View>
+                  <View style={styles.dateBox}>
+                    <Text style={[styles.text, styles.dateBoxText]}>
+                      {time && time}
+                    </Text>
+                  </View>
+                  <View style={[styles.dateBox, { borderEndWidth: 0 }]}>
+                    <Text style={[styles.text, styles.dateBoxText]}>
+                      {year && year}
+                    </Text>
+                  </View>
+                </View>
+                <View
+                  style={{
+                    flex: 0.8,
+                    minHeight: 120,
+                    height: 120,
+                    maxHeight: 120,
+                    flexDirection: 'row'
+                  }}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      this.setState({ buyDollars: false });
+                    }}
+                    style={[
+                      styles.priceBox,
+                      { marginEnd: 5 },
+                      !this.state.buyDollars && {
+                        backgroundColor: '#4968C0'
+                      }
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.textView,
+                        styles.priceTitleBox,
+                        this.state.buyDollars && { borderColor: '#A5A5A5' }
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.text,
+                          styles.priceTitle,
+                          !this.state.buyDollars && { color: '#FFF' }
+                        ]}
+                      >
+                        {isArabic ? 'بيع' : 'Sell'}
+                      </Text>
+                    </View>
+                    <View style={styles.textView}>
+                      <Text
+                        style={[
+                          styles.text,
+                          styles.priceText,
+                          !this.state.buyDollars && { color: '#FFFFFF' }
+                        ]}
+                      >
+                        {dollar2Lebanese}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      this.setState({ buyDollars: true });
+                    }}
+                    style={[
+                      styles.priceBox,
+                      { marginStart: 5 },
+                      this.state.buyDollars && {
+                        backgroundColor: '#4968C0'
+                      }
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.textView,
+                        styles.priceTitleBox,
+                        !this.state.buyDollars && { borderColor: '#A5A5A5' }
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.text,
+                          styles.priceTitle,
+                          this.state.buyDollars && { color: '#FFF' }
+                        ]}
+                      >
+                        {isArabic ? 'شراء' : 'Buy'}
+                      </Text>
+                    </View>
+                    <View style={styles.textView}>
+                      <Text
+                        style={[
+                          styles.text,
+                          styles.priceText,
+                          this.state.buyDollars && { color: '#FFFFFF' }
+                        ]}
+                      >
+                        {lebanese2Dollar}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+                <View
+                  style={[
+                    {
+                      flex: 2,
+                      width: '100%',
+                      marginTop: 20
+                    }
+                  ]}
+                >
+                  <View
+                    style={{
+                      height: 1,
+                      width: '100%',
+                      backgroundColor: '#CCCCCC',
+                      marginBottom: 20
+                    }}
+                  />
+                  <View
+                    style={{
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      flex: 1
+                    }}
+                  >
+                    <TextInput
+                      contextMenuHidden={true}
+                      keyboardType="number-pad"
+                      placeholder={'Enter Money Amount'}
+                      maxLength={12}
+                      value={this.state.money + ''}
+                      placeholderTextColor="#848FAD"
+                      onChangeText={money => {
+                        if (/^\d+$/.test(money) || money === '') {
+                          this.setState({
+                            money
+                          });
+                        }
+                      }}
+                      style={{
+                        borderRadius: 8,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        textAlign: 'center',
+                        height: 60,
+                        backgroundColor: '#ECECEC',
+                        width: '100%',
+                        fontSize: 17,
+                        fontWeight: '600',
+                        color: '#4968C0'
+                      }}
+                    />
+                  </View>
+                  <View
+                    style={[
+                      styles.textView,
+                      { flex: 2, justifyContent: 'space-around' }
+                    ]}
+                  >
+                    {!keyboardDidShow &&
+                      <View style={[styles.textView, { flex: 1 }]}>
+                        <Text
+                          style={[
+                            styles.text,
+                            {
+                              fontSize: 14,
+                              color: '#949494',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              alignSelf: 'center',
+                              textTransform: 'capitalize'
+                            }
+                          ]}
+                        >
+                          {calculatedInWords}
+                        </Text>
+                      </View>}
+                    <View style={{ flexDirection: 'row', flex: 1 }}>
+                      <View
+                        style={{
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexDirection: 'row',
+                          flex: 1,
+                          borderRadius: 8,
+                          padding: 10,
+                          backgroundColor: '#ECECEC',
+                          marginEnd: 5,
+                          width: '100%',
+                          height: 60,
+                          padding: 5,
+                          paddingHorizontal: 0
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.text,
+                            {
+                              fontSize: 18,
+                              color: '#040404',
+                              fontWeight: '600',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              alignSelf: 'center'
+                            }
+                          ]}
+                        >
+                          {calculatedNumber}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={{
+                          height: 60,
+                          width: 68,
+                          backgroundColor: '#ECECEC',
+                          borderRadius: 8,
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        activeOpacity={0.8}
+                        onPress={() => {
+                          Tts.speak(calculatedInWords);
+                        }}
+                      >
+                        <Image
+                          source={audio}
+                          style={{ width: 25, height: 25 }}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              </KeyboardAvoidingView>
             </View>
-          </KeyboardAvoidingView>
-        </ScrollView>
+          </ScrollView>}
+        {this.state.loading &&
+          <View
+            style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <ActivityIndicator />
+          </View>}
       </SafeAreaView>
     );
   }
@@ -437,5 +648,42 @@ const styles = {
     width: '100%',
     textAlign: 'center',
     textAlignVertical: 'center'
+  },
+  dateBox: {
+    borderColor: '#DBDBDB',
+    flex: 1,
+    borderEndWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  dateBoxText: {
+    color: '#040404',
+    fontSize: 14,
+    lineHeight: 30,
+    height: 30,
+    textAlign: 'center'
+  },
+  priceText: {
+    fontWeight: '300',
+    fontSize: 25
+  },
+  priceBox: {
+    flex: 2,
+    height: 120,
+    borderRadius: 8,
+    backgroundColor: '#ECEEF2',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  priceTitle: {
+    color: '#4968C0',
+    fontSize: 25,
+    fontWeight: '700'
+  },
+  priceTitleBox: {
+    borderBottomWidth: 1,
+    borderColor: '#FFF',
+
+    width: '70%'
   }
 };

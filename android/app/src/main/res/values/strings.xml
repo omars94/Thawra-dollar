@@ -1,7 +1,7 @@
 <resources>
-    <string name="app_name">USD2LBP</string>
+    <string name="app_name">Thawra Dollar</string>
     <string name="appCenterCrashes_whenToSendCrashes" moduleConfig="true" translatable="false">DO_NOT_ASK_JAVASCRIPT</string>
     <string name="appCenterAnalytics_whenToEnableAnalytics" moduleConfig="true" translatable="false">ALWAYS_SEND</string>
-    <string moduleConfig="true" name="CodePushDeploymentKey">f1Iv6iPEGVw6LASCLdDYhy7EWvpEQT4lpACgfk</string>
+    <string moduleConfig="true" name="CodePushDeploymentKey">MO-4Kd4M5NHkLIhwipHMk4Nv_VljiZax6czCk</string>
 
 </resources>
